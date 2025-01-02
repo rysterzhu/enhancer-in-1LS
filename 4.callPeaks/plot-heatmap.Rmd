@@ -1,0 +1,61 @@
+---
+title: "plot-heatmap"
+output: html_document
+date: "2023-12-26"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r distance to promoter}
+wdir="~/workspace/e.Blastocyst-K27ac/2.deeptools/6.map2peaks/3.K27ac-zscore/1.ICM-TE"
+paste0(wdir,"/ICM_TE.center.distance.txt") %>% read.tab() -> distance
+paste0(wdir,"/ICM_TE.center.LTR.distance.txt") %>% read.tab() -> LTR
+distance$cluster %<>% factor()
+distance$LTR = log10(LTR$V6+10)
+distance$TSS = log10(distance$distance+10)
+#distance$log2FC = log2((distance$ICM.exp+1)/(distance$TE.exp+1))
+distance$log2FC[is.na(distance$log2FC)] = 0
+data = distance[,c("LTR","TSS","log2FC")] #%>%scale %>% data.frame
+ann = distance[,"cluster",drop=F]
+
+
+
+apply(data,2,function(x) smooth.spline(1:length(x),x)$y ) %>% data.frame -> data2
+
+
+ggplot() +geom_density(data=distance,aes(x=log10dist))
+distance$log10dist[distance$log10dist>6]=6
+
+distance$smooth = smooth.spline(1:length(distance$dist),distance$log10dist)$y
+
+data = distance[,"smooth",drop=F]
+
+
+summary(ann$cluster)
+rownames(data2) = rownames(ann)
+pheatmap(data2[,"LTR",drop=F],annotation_row = ann,cluster_rows = F,cluster_cols = F,
+         show_rownames = F,gaps_row = c(30582,47117),
+         #breaks=seq(-1,1,length.out=1000),
+         color= BuenColors::jdb_palette("solar_blues",type = "continuous"),
+         height = 10,width=2,filename = paste0(wdir,"/ICM_TE.center.distanceLTR.pdf"))
+
+
+#algae_earth
+
+
+temp =smooth.spline(1:length(distance$dist),distance$log10dist)
+
+
+ggplot(distance) +geom_boxplot(aes(x=cluster,y=distance),outlier.size=0.1) +
+    xlab("") +ylab("log10(distance to TSS)") +
+    ggsignif::geom_signif(aes(x=cluster,y=distance),comparisons = list(c("ICM","ICM-TE"),c("TE","ICM-TE"))) +
+    scale_y_log10(labels = scales::label_number(suffix = "K", scale = 1e-3),expand = c(0, 0),limits=c(100,2e7)) +
+    annotation_logticks(sides = "l") +  theme_pubr() + theme(aspect.ratio = 1)
+ggsave(paste0(wdir,"/boxplot.ICM-TE.center.distanceTSS.pdf"))
+
+
+
+```
+

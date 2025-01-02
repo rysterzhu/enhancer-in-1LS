@@ -1,0 +1,118 @@
+---
+title: "plot-motif"
+output: html_document
+date: "2024-01-15"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r heatmap of motif pvalue filter by tf expression}
+source("~/R/library.R")
+library(ggupset)
+wdir="~/workspace/e.Blastocyst-K27ac/4.callPeaks/6.K27ac-peaks-build-analysis/3.build-remove-from-Morula/interATAC/motifs"
+
+wdir="~/workspace/e.Blastocyst-K27ac/4.callPeaks/9.K27ac-peaks-specific-analysis/1.8cell-ICM-TE/motifs"
+levels = c("8cell","ICM","TE","8cell-ICM","8cell-TE","ICM-TE","8cell-ICM-TE");expS=c(1,3,4,1,1,3,1)
+#levels = c("ICM-build","TE-build","ICM-remove","TE-remove");expS=c(3,4,2,2)
+
+wdir="~/workspace/e.Blastocyst-K27ac/4.callPeaks/9.K27ac-peaks-specific-analysis/2.8cell-Morula-ICM-TE/motifs"
+levels = c("8cell","Morula","ICM","TE","8cell-Morula","ICM-Morula","Morula-TE","ICM-TE","8cell-ICM-Morula","8cell-Morula-TE","ICM-Morula-TE","8cell-ICM-Morula-TE")
+labels = c("8cell","Morula","ICM","TE","8cell-Morula","Morula-ICM","Morula-TE","ICM-TE","8cell-Morula-ICM","8cell-Morula-TE","Morula-ICM-TE","8cell-Morula-ICM-TE")
+expS = c(1,2,3,4,1,2,2,3,2,2,3,2)
+
+wdir="~/workspace/e.Blastocyst-K27ac/4.callPeaks/9.K27ac-peaks-specific-analysis/2.8cell-Morula-ICM-TE/1by1/motifs"
+levels = c("8cell","Morula","ICM","TE");expS=c(1,2,3,4)
+
+wdir="~/workspace/e.Blastocyst-K27ac/4.callPeaks/6.K27ac-peaks-build-analysis/4.build-remove-8MIT/motifs"
+levels=c("Morula-remove","Morula-build","ICM-remove","ICM-build","TE-remove","TE-build");expS=c(1,2,2,3,2,4)
+
+wdir="~/workspace/e.Blastocyst-K27ac/4.callPeaks/9.K27ac-peaks-specific-analysis/2.8cell-Morula-ICM-TE/3.4+1/jaspar2"
+levels=c("8cell","Morula","ICM","TE","both");expS=c(1,2,3,3)
+
+wdir="~/workspace/e.Blastocyst-K27ac/4.callPeaks/9.K27ac-peaks-specific-analysis/motif-speATAC"
+levels=c("ICM-spe","TE-spe","ICM-TE-spe");expS=c(3,4,3)
+
+maxp=200
+minp=10
+mint=2
+minE=2
+paste0(wdir,"/merge.motif") %>% read.tab ->cdata
+cdata$Pvalue = -cdata$Pvalue
+cdata$Pvalue[cdata$Pvalue>maxp]=maxp
+cdata = cdata[which(cdata$Cluster %in% levels),]
+
+dcast(cdata[,-4],formula = Motif~Cluster,value.var = "Pvalue",fun.aggregate = mean) %>%
+    .[apply(.[,-1], 1, function(x) any(x>=minp)),"Motif"] -> select.motif
+
+
+dcast(cdata[,-3],formula = Motif~Cluster,value.var = "Target",fun.aggregate = mean) %>%
+    .[apply(.[,-1], 1, function(x) any(x>=mint)),"Motif"] -> select.motif2
+
+cdata[which((cdata$Motif %in% select.motif)&(cdata$Motif %in% select.motif2)),] -> cdata2
+
+cdata2$Cluster %<>%factor()
+cdata2$Motif %<>% gsub("/.*","",.)
+read.tab("~/workspace/e.Blastocyst-K27ac/3.HiC/motif2gene.tab") -> motif2gene
+merge(cdata2,motif2gene[,c(2,4)],by.x="Motif",by.y="shortname") ->cdata3
+
+
+read.tab("~/workspace/e.Blastocyst-K27ac/5.RNA/1.Stringtie/all.samples.TPM.txt") -> exp
+exp[,c(1,2,9,3,11)] -> exp
+colnames(exp) %<>% sub("-control","",.)
+merge(cdata3,exp,by.x="mouse",by.y="gene",all.x=T) ->cdata3
+cdata3$exp = apply(cdata3,1,function(x){x[expS[which(levels==x[3])]+5] %>%as.numeric()})
+
+cdata3[which(cdata3$mouse %in% c("Hoxb13","Gata3","Tfap2a","Sox17","Ctcf","Brd4")),]
+
+#cdata3$exp[cdata3$exp < m2]=m2
+#cdata3$exp[cdata3$exp > m1]=m1
+cdata3$Motif = gsub("\\(.*","",cdata3$Motif) %>% paste0(.,"(",cdata3$mouse,")")
+#cdata3[cdata3$mouse!="---"&is.na(cdata3$exp),]
+
+
+dcast(cdata3[,c("Motif","Cluster","exp")],formula = Motif~Cluster,value.var = "exp",fun.aggregate = mean) %>%
+    .[apply(.[,-1], 1, function(x) any(x>=minE|is.na(x))),"Motif"] -> select.motif3
+#select.motif3 = select.motif3[which(select.motif3!="OCT4-SOX2-TCF-NANOG(Pou5f1)")]
+cdata4= cdata3[(cdata3$Motif %in% select.motif3)&!grepl("---",cdata3$mouse),]
+
+cdata4$Cluster %<>% factor(levels = levels)
+
+dcast(cdata4[,c("Motif","Cluster","Pvalue")],formula = Motif~Cluster,value.var = "Pvalue",fun.aggregate = mean) ->cdata5
+
+rownames(cdata5) = cdata5$Motif
+
+cdata5[,-1] %>%
+pheatmap(.,cluster_rows = T,cluster_cols = F,show_rownames = T,
+         breaks = unique(c(seq(0,50,length.out=50),seq(50,200,length.out=51))),
+         cellwidth = 20,cellheight = 8,legend_labels = "-log10Pvalue",
+         filename = paste0(wdir,"/pheatmap_-log10pvalue_cluster.pdf"))
+
+
+cdata5[,-1] %>% scale() %>%
+pheatmap(.,cluster_rows = T,cluster_cols = T,
+         cellwidth = 50,cellheight = 10,legend_labels = "-log10Pvalue",
+         filename = paste0(wdir,"/pheatmap_-log10pvalue_cluster_scaleCol.pdf"))
+
+
+
+cdata5[,-1] %>% t %>% scale() %>% t %>%
+pheatmap(.,cluster_rows = T,cluster_cols = T,
+         cellwidth = 50,cellheight = 10,legend_labels = "-log10Pvalue",
+         filename = paste0(wdir,"/pheatmap_-log10pvalue_cluster_scaleRow.pdf"))
+
+
+temp = cdata4
+temp$Cluster %<>% str_split("-")
+ggplot(temp) + geom_bar(aes(x=Cluster)) + theme_bw() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    scale_fill_gradient(low="white",high="red") +
+    scale_x_upset(order_by="degree") -> g
+ggsave(paste0(wdir,"/upset_cluster.pdf"),g,width=10,height=5)
+
+
+
+
+
+```

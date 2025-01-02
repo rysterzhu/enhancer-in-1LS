@@ -1,0 +1,48 @@
+---
+title: "plot-giggle"
+output: html_document
+date: "2024-01-15"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r point giggle}
+source("~/R/library.R")
+
+wdir="~/workspace/e.Blastocyst-K27ac/4.callPeaks/6.K27ac-peaks-build-analysis/giggle"
+wdir="~/workspace/e.Blastocyst-K27ac/4.callPeaks/9.K27ac-peaks-specific-analysis/giggle/"
+#wdir="~/workspace/e.Blastocyst-K27ac/4.callPeaks/5.ATAC-K27ac-peaks-analysis/giggle"
+key="all"
+paste0(wdir,"/",key,".combo_score.tab") %>% read.tab() -> cdata
+
+cdata[, 2:3][cdata[, 2:3] < 0] <- 0
+cdata$log2FC = log2((cdata$TE+1)/(cdata$ICM+1))
+
+cdata$flag = ifelse(cdata$log2FC>1,"TE",
+                    ifelse(cdata$log2FC< -1,"ICM","unchange")) %>% factor()
+#cdata = cdata[!is.na(cdata$flag), ]
+summary(cdata$flag)
+markers=c("CDX2","H3K27AC","GATA1","GATA2","GATA4","GATA6","TFAP2C","TEAD4","KLF4","KLF5","SOX2","POU2F1","POU3F1","POU3F2","POU5F1","NANOG","TFCP2I1","NR5A2","TRPS1","GRHL2","CEBPB")
+cdata2 = cdata[cdata$TF %in% markers,]
+
+cdata$FC= log2((cdata$TE+1)/(cdata$ICM+1))
+
+l=dim(cdata)[1]
+showNum=10 #marker most diff TF
+cdata3 = cdata[order(cdata$FC),] %>% .[c(1:showNum,(l-showNum+1):l),]
+
+minScore = min(cdata[,2:3]) - 10
+maxScore = ceiling(max(cdata[,2:3])/10)*10 + 10
+
+ggplot(cdata) + geom_point(aes(x=ICM,y=TE,color=flag),size=1) +
+  ggrepel::geom_text_repel(data=cdata2,aes(x=ICM,y=TE,label=TF),color="black",size=3,max.overlaps = 20)+
+  ggrepel::geom_text_repel(data=cdata3,aes(x=ICM,y=TE,label=TF),color="darkblue",size=3,max.overlaps = 20)+
+    #ggtext(data=cdata3,x=ICM,y=TE,label=TF,color="darkblue",size=3)
+  xlab("ICM combo score") + ylab("TE combo score") +
+ # xlim(minScore,maxScore) + ylim(minScore,maxScore) +
+    theme_pubr(border = T,legend = "right")+
+  theme(aspect.ratio = 1)
+ggsave(paste0(wdir,"/",key,".combo_score.pdf"),width = 10,height = 8)
+```

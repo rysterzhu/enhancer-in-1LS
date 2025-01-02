@@ -1,0 +1,275 @@
+---
+title: "DESeq2"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+source("~/R/library.R")
+library(DESeq2)
+library(RColorBrewer)
+library(BuenColors)
+wdir="~/workspace/e.Blastocyst-K27ac/5.RNA/4.DESeq2-WT"
+samples=c("8cell","Morula","ICM","TE") 
+```
+
+```{r input, warning=FALSE}
+geneCounts = paste0(wdir,"/all.txt") %>% fread(drop = 2:6) %>% data.frame(row.names = 1,check.names = F)
+colnames(geneCounts) %<>% gsub(".sorted.bam","",.) %>% gsub("-control","",.)
+
+
+sampleTable = str_split_fixed(colnames(geneCounts),"_RNA_rep",n = 2) %>%
+    data.frame(stringsAsFactors = F) %>% `colnames<-`(c("sample","replicate"))
+
+sampleTable$sample %<>% gsub("-",".",.) %>% factor(levels = samples)
+sampleTable$replicate %<>% paste0("rep",.) %>% factor
+
+ddsMatrix <- DESeqDataSetFromMatrix(countData = geneCounts,
+                              colData = sampleTable,
+                              design = ~ sample)
+```
+
+```{r DESeq2}
+dds <- DESeq(ddsMatrix)
+
+coldata = colData(dds) %>% data.frame
+resultsNames(dds)
+
+rld.F <- rlog(dds, blind=F) #F用于下游分析，利用design信息考虑实验设计差异
+rld <- rlog(dds, blind=T) #T用于QA，不受样本信息偏见
+vsd <- varianceStabilizingTransformation(dds, blind=T)
+vsd.F <- varianceStabilizingTransformation(dds, blind=F)
+counts.normlized = counts(dds,normalized=T)
+rld.F %>% assay %>% data.frame(check.names = F) %>% 
+    split.default(., factor(sampleTable$sample)) %>% 
+    sapply(., rowMeans) %>%
+    data.frame(check.names = F) -> mean.rld
+counts.normlized  %>% data.frame(check.names = F) %>% 
+    split.default(., factor(sampleTable$sample)) %>% 
+    sapply(., rowMeans) %>%
+    data.frame(check.names = F) -> mean.counts
+counts(dds,normalized=F)  %>% data.frame(check.names = F) %>% 
+    split.default(., factor(sampleTable$sample)) %>% 
+    sapply(., rowMeans) %>%
+    data.frame(check.names = F) -> mean.raw
+
+save.image(paste0(wdir,"/DESeq2.WT.RData"))
+load(paste0(wdir,"/DESeq2.WT.RData"))
+
+ress=list()
+ress[["ICM2TE"]] = results(dds,contrast = c("sample","TE","ICM")) %>% data.frame()
+ress[["Morula2ICM"]] = results(dds,contrast = c("sample","ICM","Morula")) %>% data.frame()
+ress[["Morula2TE"]] = results(dds,contrast = c("sample","TE","Morula")) %>% data.frame()
+ress[["8cell2Morula"]] = results(dds,contrast = c("sample","Morula","8cell")) %>% data.frame()
+
+res.all=data.frame()
+for(i in names(ress)){
+    ress[[i]]$gene = rownames(ress[[i]])
+    ress[[i]]$compare = i
+    ress[[i]]$change = ifelse(is.na(ress[[i]]$padj) | ress[[i]]$padj >= 0.05 | abs(ress[[i]]$log2FoldChange) <= log2(2),"Unchange", ifelse(ress[[i]]$log2FoldChange>0,"Upregulate","Downregulate")) %>% factor()
+    res.all = rbind(res.all,ress[[i]])
+    cat(i,"\t",summary(ress[[i]]$change),"\n")
+    write.tab(ress[[i]],paste0(wdir,"/res.",i,".padj005.FC2.tab"),row.names = F)
+}
+
+```
+
+```{r PCA}
+data <- plotPCA(rld, intgroup=c("sample","replicate"), returnData=TRUE)
+percentVar <- round(100 * attr(data, "percentVar"))
+
+ggplot(data, aes(PC1, PC2)) + geom_point(aes(color = sample),size= 5) +
+  geom_text(aes(label=gsub("rep","",replicate)),size=4)+
+ # scale_color_manual(values = c("darkviolet","pink2","deepskyblue4","royalblue2")) + 
+  scale_shape_manual(values=c(18,16))+
+  xlab(paste0("PC1: ",percentVar[1],"% variance")) + 
+  ylab(paste0("PC2: ",percentVar[2],"% variance")) + 
+  theme_zhu()
+ggsave(paste0(wdir,"/PCA.rld.pdf"),width=7.6,height=4.8)
+
+data <- cor(rld.F %>% assay %>% data.frame(check.names = F))
+
+pheatmap(data,cellwidth = 15,cellheight = 15,
+         filename = paste0(wdir,"/cor-pearson.pdf"))
+```
+
+```{r heatmap}
+mean.rld %>% t %>% scale %>%t %>% .["Cdx2",]
+
+
+temp <- mean.rld[apply(mean.rld,1, function(x) var(x)!=0 & any(x>5)),] %>% t %>% scale %>%t 
+Centers=7
+km= kmeans(temp,centers = Centers,iter.max = 10000,nstart=30)
+data.frame(value=rowMeans(temp),cluster=km$cluster) %>% 
+  aggregate(.~cluster,.,mean) %>% .[order(.[,2],decreasing = T),1] ->levs
+
+ann = data.frame(cluster=factor(km$cluster,levels = levs,labels = 1:Centers))
+#ann$cluster %<>% factor(levels = c(1,3,2,6,4,5,7))
+maxE=2
+pheatmap(temp[order(ann$cluster),],cluster_rows = F ,border_color = NA  ,cluster_cols = F,
+         color= colorRampPalette(c("#377EB8","white","#E41A1C"))(200),
+    display_numbers =F, #scale="row",
+      annotation_row = ann,#annotation_colors = list( cluster=col),
+        show_rownames = F,show_colnames = T,#fontsize_row =8,
+      height = 10, width = 5,#breaks = c(seq(-maxE,maxE,length.out = 200)),
+        filename =paste0(wdir,"/pheatmap-kmeans",Centers,".sorted.scale.pdf"))
+
+ann$gene = rownames(ann)
+
+write.tab(ann,file = paste0(wdir,"/cluster-kmeans7.tab"),col.names = F,row.names = F)
+
+
+
+```
+
+```{r cluster 8MIT}
+temp <- mean.rld[apply(mean.rld,1, var, na.rm = TRUE) != 0,] %>% t() %>% scale %>%t() %>%as.data.frame()
+cutoff=0.5
+
+temp2 = rbind(temp[temp$`8cell` < -cutoff & temp$Morula>cutoff & temp$TE>cutoff,],
+              temp[temp$`8cell` < -cutoff & temp$Morula < -cutoff & temp$TE>cutoff,])
+#temp2=temp2[order(temp2$Morula,decreasing = T),]
+
+pheatmap(temp2[,-3],cluster_rows = F ,border_color = NA  ,cluster_cols = F,
+         color= colorRampPalette(c("#377EB8","white","#E41A1C"))(200),
+    display_numbers =F, #scale="row",
+        show_rownames = F,show_colnames = T,#fontsize_row =8,
+      height = 5, width = 2,breaks = c(seq(-maxE,maxE,length.out = 200)),
+        filename =paste0(wdir,"/pheatmap-kmeans",Centers,".8MT.pdf"))
+
+
+temp2 = rbind(temp[temp$`8cell` < -cutoff & temp$Morula>cutoff&temp$ICM>cutoff,],temp[temp$`8cell` < -cutoff & temp$Morula < -cutoff &temp$ICM>cutoff,])
+#temp2=temp2[order(temp2$Morula,decreasing = T),]
+
+pheatmap(temp2[,-4],cluster_rows = F ,border_color = NA  ,cluster_cols = F,
+         color= colorRampPalette(c("#377EB8","white","#E41A1C"))(200),
+    display_numbers =F, #scale="row",
+        show_rownames = F,show_colnames = T,#fontsize_row =8,
+      height = 5, width = 2,breaks = c(seq(-maxE,maxE,length.out = 200)),
+        filename =paste0(wdir,"/pheatmap-kmeans",Centers,".8MI.2.pdf"))
+
+#data.frame(gene=)
+
+temp$flag1 = ifelse(temp$`8cell` < -cutoff & temp$Morula>cutoff & temp$TE>cutoff,"TE-Morula",
+            ifelse(temp$`8cell` < -cutoff & temp$Morula < -cutoff & temp$TE>cutoff,"TE-only",NA))
+            
+temp$flag2 = ifelse(temp$`8cell` < -cutoff & temp$Morula > cutoff & temp$ICM>cutoff,"ICM-Morula",
+            ifelse(temp$`8cell` < -cutoff & temp$Morula < -cutoff & temp$ICM>cutoff,"ICM-only",NA))
+
+which(!is.na(temp$flag1)&!is.na(temp$flag2)) %>% length()
+
+temp$gene = row.names(temp)
+
+rbind(temp[!is.na(temp$flag1),c("gene","flag1")],temp[!is.na(temp$flag2),c("gene","flag2")]%>%`colnames<-`(c("gene","flag1"))) ->temp3
+
+write.tab(temp3,file = paste0(wdir,"/cluster-8MIT.tab"),col.names = F,row.names = F)
+
+################use DESeq2
+res.all[,c(7,8,9)] %>% dcast(.,gene~compare,value.var = "change") -> de.tab
+de.tab$flagICM = ifelse(de.tab$`8cell2Morula`=="Upregulate",ifelse(de.tab$Morula2ICM=="Downregulate","NA","ICM-Morula"),ifelse(de.tab$`8cell2Morula`=="Unchange"&de.tab$Morula2ICM=="Upregulate","ICM-only","NA"))
+de.tab$flagTE = ifelse(de.tab$`8cell2Morula`=="Upregulate",ifelse(de.tab$Morula2TE=="Downregulate","NA","TE-Morula"),ifelse(de.tab$`8cell2Morula`=="Unchange"&de.tab$Morula2TE=="Upregulate","TE-only","NA"))
+
+temp <- mean.rld[apply(mean.rld,1, var, na.rm = TRUE) != 0,] %>% t() %>% scale %>%t() %>%as.data.frame()
+genes=c(de.tab[de.tab$flagICM=="ICM-Morula","gene"],de.tab[de.tab$flagICM=="ICM-only","gene"],de.tab[de.tab$flagTE=="TE-Morula","gene"],de.tab[de.tab$flagTE=="TE-only","gene"])
+temp2 = temp[genes,]
+
+pheatmap(temp2,cluster_rows = F ,border_color = NA  ,cluster_cols = F,
+         color= colorRampPalette(c("#377EB8","white","#E41A1C"))(200),
+    display_numbers =F, #scale="row",
+        show_rownames = F,show_colnames = T,#fontsize_row =8,
+      height = 5, width = 2,breaks = c(seq(-maxE,maxE,length.out = 200)),
+        filename =paste0(wdir,"/pheatmap.exp.8MIT.scale.pdf"))
+
+###################################
+res.all[,c(7,8,9)] %>% dcast(.,gene~compare,value.var = "change") -> de.tab
+
+genes = c(de.tab[de.tab$Morula2ICM=="Upregulate","gene"],de.tab[de.tab$Morula2TE=="Upregulate","gene"])
+
+#############
+res.all[,c(7,8,9)] %>% dcast(.,gene~compare,value.var = "change") -> de.tab
+de.tab$flag = ifelse(de.tab$Morula2ICM=="Upregulate",ifelse(de.tab$Morula2TE=="Upregulate","both","ICM"),ifelse(de.tab$Morula2TE=="Upregulate","TE","NA"))
+de.tab = de.tab[de.tab$flag!="NA",]
+genes = de.tab[order(de.tab$flag),"gene"]
+
+```
+
+```{r boxplot K27ac}
+K27 = read.tab("~/workspace/e.Blastocyst-K27ac/2.deeptools/4.multiBamSummary/1.K27ac-merge_rep/merge.promoter_10k-10k.rpkm")
+colnames(K27) %<>% gsub("_K27ac","",.)
+
+library(easyGgplot2)
+eGs=list()
+for(i in samples){
+temp = mean.counts[order(mean.counts[,i]),]
+temp$gene = row.names(temp)
+temp$flag = ifelse(temp[,i]==0,"Non-exp","High-exp") %>%factor()
+l=length(which(temp[,i]==0))
+temp = temp[c(1:l,(dim(temp)[1]-l):dim(temp)[1]),c("gene","flag")]
+temp2 = merge(temp,K27[,c("gene",i)])
+temp2$log2RPKMp1 = log2(temp2[,i] + 1)
+
+g= ggplot(aes(x=flag,y=log2RPKMp1,fill=flag),data=temp2) + geom_boxplot(outlier.size = 0) +
+    ggsignif::geom_signif(y_position = 4.5,comparisons = list(c("Non-exp","High-exp")))+
+    ylim(0,5) + ylab("H3K27ac\nlog2(RPKM+1)") + xlab(i) +
+    ggtitle(paste0("TSS+-10kb, n=",l))+
+    theme_zhu(aspect.ratio = 2)
+eGs=c(eGs,list(g))
+}
+
+cairo_pdf(paste0(wdir,"/all_K27ac_by_exp.pdf"))
+ggplot2.multiplot(plotlist = eGs, cols=2)
+dev.off()
+
+```
+
+```{r point correlation}
+K27 = read.tab("~/workspace/e.Blastocyst-K27ac/2.deeptools/4.multiBamSummary/1.K27ac-merge_rep/merge.promoter_10k-10k.rpkm")
+colnames(K27) %<>% gsub("_K27ac","",.)
+
+library(easyGgplot2)
+eGs=list()
+for(i in samples){
+temp = mean.rld[,i,drop=F] %>% `colnames<-`("exp")
+temp$gene = row.names(temp)
+temp2 = merge(temp,K27[,c("gene",i)])
+temp2$log2Exp = temp2$exp
+temp2$log2K27 = log2(temp2[,i]+1)
+cor = cor(x=temp2$log2Exp,y=temp2$log2K27,method = "pearson") %>% round(.,3)
+ggplot(temp2) + geom_point(aes(x=log2Exp,y=log2K27),color="darkgrey") + 
+    ggtitle(paste0(i," cor=",cor))+ ylab("H3K27ac\nlog2(RPKM+1)") + xlab("expression") +  
+    theme_zhu(aspect.ratio = 1) -> g
+eGs=c(eGs,list(g))
+}
+
+cairo_pdf(paste0(wdir,"/point_cor_K27-exp.pdf"))
+ggplot2.multiplot(plotlist = eGs, cols=2)
+dev.off()
+
+```
+
+```{r point foldchange correlation}
+K27 = read.tab("~/workspace/e.Blastocyst-K27ac/2.deeptools/4.multiBamSummary/1.K27ac-merge_rep/merge.promoter_10k-10k.rpkm")
+colnames(K27) %<>% gsub("_K27ac","",.)
+library(easyGgplot2)
+eGs=list()
+
+for(i in c("8cell2Morula","Morula2ICM","Morula2TE","ICM2TE")){
+temp = res.all[res.all$compare==i&!is.na(res.all$log2FoldChange),c("log2FoldChange","gene")]
+str.split(i,"2") -> comp
+temp2 = merge(temp,K27[,c("gene",comp[1,1],comp[1,2])])
+temp2$log2FCK27 = log2((temp2[,4]+1)/(temp2[,3]+1))
+
+cor = cor(x=temp2$log2FoldChange,y=temp2$log2FCK27,method = "pearson") %>% round(.,3)
+ggplot(temp2) + geom_point(aes(x=log2FoldChange,y=log2FCK27),color="darkgrey") + 
+    ggtitle(paste0(i," cor=",cor))+ ylab(paste0("log2FC(",comp[1,2],"/",comp[1,1]," K27ac)")) + xlab(paste0("log2FC(",comp[1,2],"/",comp[1,1]," exp)")) +  
+    theme_zhu(aspect.ratio = 1) -> g
+eGs=c(eGs,list(g))
+}
+
+cairo_pdf(paste0(wdir,"/point_cor_log2FC-K27-exp.pdf"))
+ggplot2.multiplot(plotlist = eGs, cols=2)
+dev.off()
+
+
+```
+

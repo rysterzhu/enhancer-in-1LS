@@ -1,0 +1,111 @@
+---
+title: "DESeq2"
+output: html_document
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+source("~/R/library.R")
+library(DESeq2)
+library(RColorBrewer)
+library(BuenColors)
+wdir="~/workspace/e.Blastocyst-K27ac/5.RNA/5.DESeq2-Morula2"
+samples=c("control","AControl","A485","SAHA","TSA","siP300") 
+```
+
+```{r input, warning=FALSE}
+geneCounts = paste0(wdir,"/Morula.txt") %>% fread(drop = 2:6) %>% data.frame(row.names = 1,check.names = F)
+colnames(geneCounts) <- str_split_fixed(colnames(geneCounts),"-mouse/|.sorted",n = 10)[,2]
+
+
+
+sampleTable = str_split_fixed(colnames(geneCounts),"_RNA_",n = 2) %>%
+    data.frame(stringsAsFactors = F) %>% `colnames<-`(c("sample","replicate"))
+
+
+
+sampleTable$sample %<>% gsub("Morula-","",.) %>% factor(levels=samples,labels = c("control","control","A485","SAHA","TSA","siP300"))
+sampleTable$replicate %<>% factor
+
+ddsMatrix <- DESeqDataSetFromMatrix(countData = geneCounts,
+                              colData = sampleTable,
+                              design = ~ sample)
+```
+
+```{r DESeq2}
+dds <- DESeq(ddsMatrix)
+
+coldata = colData(dds) %>% data.frame
+resultsNames(dds)
+
+rld.F <- rlog(dds, blind=F) #F用于下游分析，利用design信息考虑实验设计差异
+rld <- rlog(dds, blind=T) #T用于QA，不受样本信息偏见
+vsd <- varianceStabilizingTransformation(dds, blind=T)
+vsd.F <- varianceStabilizingTransformation(dds, blind=F)
+counts.normlized = counts(dds,normalized=T)
+rld.F %>% assay %>% data.frame(check.names = F) %>% 
+    split.default(., factor(sampleTable$sample)) %>% 
+    sapply(., rowMeans) %>%
+    data.frame(check.names = F) -> mean.rld
+counts.normlized  %>% data.frame(check.names = F) %>% 
+    split.default(., factor(sampleTable$sample)) %>% 
+    sapply(., rowMeans) %>%
+    data.frame(check.names = F) -> mean.counts
+counts(dds,normalized=F)  %>% data.frame(check.names = F) %>% 
+    split.default(., factor(sampleTable$sample)) %>% 
+    sapply(., rowMeans) %>%
+    data.frame(check.names = F) -> mean.raw
+
+ress=list()
+ress[["A485"]] = results(dds,contrast = c("sample","A485","control")) %>% data.frame()
+ress[["SAHA"]] = results(dds,contrast = c("sample","SAHA","control")) %>% data.frame()
+ress[["TSA"]] = results(dds,contrast = c("sample","TSA","control")) %>% data.frame()
+ress[["siP300"]] = results(dds,contrast = c("sample","siP300","control")) %>% data.frame()
+
+res.all=data.frame()
+for(i in names(ress)){
+    ress[[i]]$gene = rownames(ress[[i]])
+    ress[[i]]$compare = i
+    ress[[i]]$change = ifelse(is.na(ress[[i]]$padj) | ress[[i]]$padj >= 0.05 | abs(ress[[i]]$log2FoldChange) <= log2(2),"Unchange", ifelse(ress[[i]]$log2FoldChange>0,"Upregulate","Downregulate")) %>% factor()
+    res.all = rbind(res.all,ress[[i]])
+    cat(i,"\t",summary(ress[[i]]$change),"\n")
+    write.tab(ress[[i]],paste0(wdir,"/res.",i,".padj005.FC2.tab"),row.names = F)
+}
+write.tab(res.all,paste0(wdir,"/res.","all",".padj005.FC2.tab"),row.names = F)
+save.image(paste0(wdir,"/DESeq2.RData"))
+load(paste0(wdir,"/DESeq2.RData"))
+
+```
+
+```{r PCA}
+data <- plotPCA(rld, intgroup=c("sample","replicate"), returnData=TRUE)
+percentVar <- round(100 * attr(data, "percentVar"))
+
+ggplot(data, aes(PC1, PC2)) + geom_point(aes(color = sample),size= 5) +
+  geom_text(aes(label=gsub("rep","",replicate)),size=4)+
+  scale_color_manual(values = as.vector(jdb_color_maps)) + 
+  scale_shape_manual(values=c(18,16))+
+  xlab(paste0("PC1: ",percentVar[1],"% variance")) + 
+  ylab(paste0("PC2: ",percentVar[2],"% variance")) + 
+  theme_zhu()
+ggsave(paste0(wdir,"/PCA.rld.pdf"),width=7.6,height=4.8)
+```
+
+```{r Volcano}
+candidate.genes = c("Sox2","Pou5f1","Tfap2c","Nanog","Tbx3","Gata3","Klf4","Cdx2")
+for(i in names(ress)){
+
+temp=ress[[i]][which(!is.na(ress[[i]]$padj)),]
+temp2 = temp[which(!is.na(temp$padj)),]
+temp3 = temp[which(temp$gene %in% candidate.genes),]
+ggplot() + geom_point(data = temp2, aes(x=log2FoldChange,y=-log10(padj),color=change),size=1) + 
+    ggtitle(paste0(i," Downregulate: ",sum(temp$change=="Downregulate"),", Upregulate: ",sum(temp$change=="Upregulate"))) +
+    geom_point(data = temp3,aes(x=log2FoldChange,y=-log10(padj)),size=1,color="black") + 
+    ggrepel::geom_text_repel(data = temp3,aes(x=log2FoldChange,y=-log10(padj),label=gene),size=3,max.overlaps = 50) +
+  theme_zhu(aspect.ratio = 1.5)
+ggsave(paste0(wdir,"/Volcano.",i,".padj.pdf"),width=5.6,height=4.8)
+}
+```
+
+

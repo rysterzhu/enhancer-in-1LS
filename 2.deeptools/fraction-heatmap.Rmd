@@ -1,0 +1,109 @@
+---
+title: "PCA-fraction"
+output: html_document
+date: "2023-10-20"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r PCA of fraction}
+source("~/R/library.R")
+wdir="~/workspace/e.Blastocyst-K27ac/2.deeptools/5.PCA-fraction/1.K27ac" 
+ddir="~/workspace/e.Blastocyst-K27ac/2.deeptools/4.multiBamSummary/2.K27ac-reps"
+samples=c("8cell","Morula","ICM","TE")
+paste0("/home/qszhu/workspace/e.Blastocyst-K27ac/4.callPeaks/4.MACS2-narrow-q5/merge.K27ac.fraction") %>% read.tab(col.names=c("chr","start","end"),select=1:3) -> merge.fraction
+for(i in samples){
+    paste0(ddir,"/",i,".1k.rpkm") %>% read.tab -> temp
+    merge(merge.fraction,temp,by=c("chr","start","end")) -> merge.fraction
+}
+
+
+merge.fraction[,grep("K27ac",colnames(merge.fraction))] -> cdata2
+cdata2 = cdata2[apply(cdata2,1,function(x) any(x>1)),]
+cdata2 = cdata2[apply(cdata2, 1, var, na.rm = TRUE) != 0,]  %>% add(1) %>% log2 #for rpkm
+
+coltab = str.split(colnames(cdata2),"_",col.names = c("sample","HM","rep"))
+coltab$sample %<>% factor(levels=samples)
+
+data_pca <- prcomp(t(cdata2),scale. = F) # scale. = T  不好 
+summary(data_pca)
+percentVar <- summary(data_pca)$importance[2,1:2]
+data_pca_x <- data.frame(data_pca$x[,1:2] )
+data_pca_x$Sample = coltab$sample
+data_pca_x$HM = coltab$HM
+data_pca_x$rep = gsub("rep","",coltab$rep)
+
+ggplot(data=data_pca_x, aes(PC1, PC2)) + geom_point(aes(color = Sample,shape=HM),size = 7)+
+    geom_text(aes(label=rep)) + 
+    xlab(paste0("PC1: ",percentVar[1]*100,"% variance")) + 
+  ylab(paste0("PC2: ",percentVar[2]*100,"% variance")) + 
+  scale_color_manual(values = c("red","pink","darkgreen","skyblue")) + 
+    theme_zhu()
+ggsave(paste0(wdir,"/PCA-merge.fraction_log2RPKMp1.pdf"),width = 5.2,height = 3.6)
+
+write.tab(data_pca_x,paste0(wdir,"/PCA-merge.fraction_log2ratio.tab"))
+test = cor(cdata2)
+pheatmap(test,height = 5,width = 5,
+         filename = paste0(wdir,"/pheatmap-cor.pdf"))
+##############
+test=cdata2
+test$var = apply(test, 1, var)
+temp = test[test$var>1,1:8]
+Max.distance="-var1"
+#这种方式也可以，但不太好，可能是某些少量的异常值被算在里面了
+##############
+Max.distance = 0
+loding = data_pca$rotation %>% apply(2,scale) %>% data.frame %>% `rownames<-`(rownames(data_pca$rotation))
+##对PC loading值做zscore，取离原点半径>2的点
+loding$distance = loding$PC1^2 + loding$PC2^2
+
+loding$flag = ifelse(loding$distance >= Max.distance,yes="OUT",no="IN") %>% factor
+
+loding %>% ggplot(aes(PC1, PC2)) + geom_point(aes(color = flag),size = 1)+
+  scale_color_manual(values = c("grey","darkgreen")) +
+  xlab(paste0("PC1: ",percentVar[1]*100,"% variance")) + 
+  ylab(paste0("PC2: ",percentVar[2]*100,"% variance")) + 
+  xlim(-10,10) + ylim(-10,10) + 
+  theme_zhu(aspect.ratio = 3/4)
+ggsave(paste0(wdir,"/rotation_distance",Max.distance,".png"),width=4.6,height=4,dpi=600)
+write.tab(loding[,c(1,2,18,19)],paste0(wdir,"/rotation_distance",Max.distance,".tab"))
+
+temp = cdata2[which(loding$flag == "OUT"),]
+Centers=7
+km= kmeans(temp,centers = Centers,iter.max = 10000,nstart=30)
+data.frame(value=rowMeans(temp),cluster=km$cluster) %>% 
+  aggregate(.~cluster,.,mean) %>% .[order(.[,2],decreasing = T),1] ->levs
+
+ann = data.frame(cluster=factor(km$cluster,levels = levs,labels = 1:Centers))
+#ann$cluster %<>% factor(levels = c(1,3,2,6,4,5,7))
+maxE=3
+pheatmap(temp[order(ann$cluster),],cluster_rows = F ,border_color = NA  ,cluster_cols = F,
+         color= colorRampPalette(c("#377EB8","white","#E41A1C"))(200),
+    display_numbers =F, #scale="row",
+      annotation_row = ann,#annotation_colors = list( cluster=col),
+        show_rownames = F,show_colnames = T,#fontsize_row =8,
+      height = 10, width = 5,breaks = c(seq(0,1,length.out = 100),seq(1.01,maxE,length.out=100)),
+        filename =paste0(wdir,"/pheatmap_OUT",Max.distance,"-kmeans",Centers,".sorted.unclustercols.png"))
+
+merge.fraction[rownames(temp),1:3] -> position
+position$cluster = ann$cluster
+summary(ann$cluster)
+
+for(i in 1:Centers){
+    position[which(position$cluster == i),1:3] %>% 
+        write.tab(file = paste0(wdir,"/Cluster",i,".bed"),col.names = F)
+}
+
+
+#############################################
+pheatmap(temp,cluster_rows = T ,border_color = NA  ,cluster_cols = F,
+         color= colorRampPalette(c("#377EB8","white","#E41A1C"))(200),
+    display_numbers =F, #scale="row",
+        show_rownames = F,show_colnames = T,#fontsize_row =8,
+      height = 10, width = 5,breaks = c(seq(0,1,length.out = 100),seq(1.01,maxE,length.out=100)),
+        filename =paste0(wdir,"/pheatmap_OUT",Max.distance,".hclust.png"))
+
+```
+

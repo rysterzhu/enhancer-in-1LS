@@ -1,0 +1,93 @@
+---
+title: "plot-PCA"
+output: pdf_document
+date: "2023-10-15"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r plot PCA for siP300}
+source("~/R/library.R")
+
+read.tab("~/workspace/e.Blastocyst-K27ac/2.deeptools/3.plotCorrelation/2.mouse-K27ac/siP300-rowCenter2.tab",row.names = 1) -> cdata #
+
+t(cdata[1:2,-dim(cdata)[2]]) -> cdata2
+str.split(rownames(cdata2),"_") %>% .[,c(1,3)] %>% `colnames<-`(c("stage","rep")) %>% cbind(cdata2) -> cdata3
+
+cdata3$condition = ifelse(grepl("siP300",cdata3$stage),"siP300","WT")
+cdata3$stage %<>% gsub("-siP300","",.) %>% factor(levels=c("8cell","Morula","ICM","TE"))
+
+
+ggplot(data=cdata3, aes(`1`, `2`)) + geom_point(aes(color = stage,shape=condition),size=5)+
+    xlab(paste0("PC1: ",round(cdata[1,dim(cdata)[2]]/sum(cdata[,dim(cdata)[2]])*100,2),"% variance")) +
+  ylab(paste0("PC2: ",round(cdata[2,dim(cdata)[2]]/sum(cdata[,dim(cdata)[2]])*100,2),"% variance")) +
+  scale_color_manual(values = c("pink","pink4","blue","green")) +
+    scale_shape_manual(values=c(15,16))+
+    theme_zhu()
+ggsave(paste0("~/workspace/e.Blastocyst-K27ac/2.deeptools/3.plotCorrelation/2.mouse-K27ac/PCA-10k-10k_siP300.pdf"),width = 5.2,height = 3.6)
+```
+
+```{r plot PCA for WT}
+source("~/R/library.R")
+wdir="~/workspace/e.Blastocyst-K27ac/2.deeptools/3.plotCorrelation/5.mouse-K27ac-peaks"
+wdir="~/workspace/e.Blastocyst-K27ac/2.deeptools/3.plotCorrelation/3.mouse-ATAC"
+read.tab(paste0(wdir,"/20240410-transpose.tab"),row.names = 1) -> cdata
+
+t(cdata[1:2,-dim(cdata)[2]]) -> cdata2
+str.split(rownames(cdata2),"_") %>% .[,c(1,3)] %>% `colnames<-`(c("stage","rep")) %>% cbind(cdata2) -> cdata3
+
+cdata3$stage %<>% gsub("-siP300","",.) %>% factor(levels=c("8cell","Morula","ICM","TE"))
+cdata3$rep %<>% gsub("rep","",.)
+
+
+ggplot(data=cdata3, aes(`1`, `2`)) + geom_point(aes(color = stage),size=5)+
+    geom_text(aes(label=rep)) + ggtitle("K27ac PCA") +
+    xlab(paste0("PC1: ",round(cdata[1,dim(cdata)[2]]/sum(cdata[,dim(cdata)[2]])*100,2),"% variance")) +
+  ylab(paste0("PC2: ",round(cdata[2,dim(cdata)[2]]/sum(cdata[,dim(cdata)[2]])*100,2),"% variance")) +
+ # scale_color_manual(values = c("pink4","blue","green")) +
+    theme_zhu()
+ggsave(paste0(paste0(wdir,"/20240410-transpose.pdf")),width = 5.2,height = 3.6)
+
+
+```
+
+```{r PCA correlation in peaks}
+source("~/R/library.R")
+wdir="~/workspace/e.Blastocyst-K27ac/2.deeptools/3.plotCorrelation/3.mouse-ATAC"
+wdir="~/workspace/e.Blastocyst-K27ac/2.deeptools/3.plotCorrelation/5.mouse-K27ac-peaks"
+samples=c("8cell","Morula","ICM","TE")
+paste0(wdir,"/20240410.tab") %>% read.tab() -> cdata
+colnames(cdata) %<>% gsub("[#']","",.) %>% gsub("_K27ac_rep","_",.)
+cdata = cdata[,-3:-1]
+#cdata = cdata[,!grepl("TE_[6]",colnames(cdata))]
+coltab = str.split(colnames(cdata),"_",col.names = c("sample","rep"))
+coltab$sample %<>% factor(levels=samples)
+
+
+cdata2 = cdata[apply(cdata, 1, var, na.rm = TRUE) != 0,]  %>% add(1) %>% log2 #for rpkm
+
+data_pca <- prcomp(t(cdata2),scale. = F) # scale. = T  不好
+summary(data_pca)
+percentVar <- summary(data_pca)$importance[2,1:2]
+data_pca_x <- data.frame(data_pca$x[,1:2] )
+data_pca_x$Sample = coltab$sample
+data_pca_x$HM = coltab$HM
+data_pca_x$rep = gsub("rep","",coltab$rep)
+
+ggplot(data=data_pca_x, aes(PC1, PC2)) + geom_point(aes(color = Sample),size = 7) +
+    geom_text(aes(label=rep)) +
+    xlab(paste0("PC1: ",percentVar[1]*100,"% variance")) +
+    ylab(paste0("PC2: ",percentVar[2]*100,"% variance")) +
+    scale_color_manual(values = c("red","pink","darkgreen","skyblue")) +
+    theme_zhu()
+ggsave(paste0(wdir,"/PCA-merge.peaks_log2RPKMp1.pdf"),width = 5.2,height = 3.6)
+
+
+test = cor(cdata)
+pheatmap(test,height = 5,width = 5,filename = paste0(wdir,"/20240410.pheatmap-cor.pdf"),
+    clustering_distance_rows = "euclidean",breaks = seq(0.5,1,length.out=100),
+    clustering_distance_cols = "euclidean")
+
+```

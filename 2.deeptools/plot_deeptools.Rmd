@@ -1,0 +1,24 @@
+---
+title: "deeptools"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r boxplot rpkm in peaks}
+wdir="~/workspace/e.Blastocyst-K27ac/2.deeptools/3.plotCorrelation/1.human-k27ac/mouse-peaks-test"
+
+read.tab(paste0(wdir,"/all.hg38.tab")) -> cdata
+cdata$peak %<>% gsub(".hg38.tab",".mouse.peak",.) 
+cdata[,-3:-1] %>% melt(.,id.vars="peak",variable.name="sample",value.name = "RPKM") -> cdata2
+cdata2$K27ac = ifelse(grepl("ICM",cdata2$sample),"ICM","TE") %>% factor
+
+ggplot() + geom_boxplot(aes(x=sample,y=log2(RPKM+1),fill=K27ac),cdata2,outlier.shape = NA) + 
+    facet_wrap(.~peak,ncol=2) + 
+    theme_bw() + 
+    theme(axis.text.x = element_text(angle = 45,hjust=1))
+ggsave(paste0(wdir,"/boxplot.K27ac-in-mouse-peaks.pdf"),width = 10,height = 5)
+```
+

@@ -1,0 +1,98 @@
+---
+title: "annotate_peaks"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+wdir="~/workspace/e.Blastocyst-K27ac/4.callPeaks/5.ATAC-K27ac-peaks-analysis"
+stages=c("8cell","Morula","ICM","TE")
+
+wdir="~/workspace/e.Blastocyst-K27ac/4.callPeaks/c.MACS2-narrow-q5-YY1"
+stages=c("e2cell","l2cell","4cell","e8cell","l8cell","Morula","ICM","TE")
+paste0(wdir,"/annStats/all.stats.tab") %>% read.tab(header=T) -> cdata
+coltab = str.split(cdata$sample,"_",col.names = c("stage","hm")) %>% data.table()
+
+coltab$stage %<>% factor(levels = stages)
+cbind(cdata,coltab) ->temp
+temp[,c("Annotation","Log2 Ratio (obs/exp)","stage","hm")] -> enrich
+colnames(enrich)[2] = "enrich"
+
+select = c("Promoter","CpG-Island","LTR","SINE","LINE","3UTR","5UTR","Intergenic","tRNA","Exon","Intron","rRNA")
+#select = c("Promoter","CpG-Island","3UTR","5UTR")
+enrich[which(enrich$Annotation %in% select),] %>%
+ggplot() +
+    geom_bar(aes(x = Annotation,y=enrich),
+        stat="identity", position = position_dodge2(preserve = 'single'),
+        width = 0.75,show.legend = T,fill="skyblue") +
+    xlab("") + ylab("Log2(Obeserved/Expected)")+
+    #scale_fill_manual(values = c("red","blue","pink"),guide=guide_legend(title = "")) +
+    geom_hline(yintercept=0) +
+    facet_wrap(~stage+hm,ncol=3,scales = "free_y") +
+    ggpubr::theme_pubr(border=T) +
+    theme(axis.line.y = element_line(),
+        plot.margin = margin(10,10,5,5),
+        aspect.ratio = 1/2,axis.text.x = element_text(angle = 45,hjust = 1))
+ggsave(paste0(wdir,"/annotate_all.pdf"),width = 9,height = 9,device = cairo_pdf)
+```
+
+```{r K27ac}
+wdir="~/workspace/e.Blastocyst-K27ac/4.callPeaks/5.ATAC-K27ac-peaks-analysis"
+stages=c("8cell","Morula","ICM","TE")
+
+paste0(wdir,"/annStats/all.stats.tab") %>% read.tab(header=T) -> cdata
+#select = c("Promoter","LTR","SINE","LINE")
+select = c("Promoter","CpG-Island","LTR","SINE","LINE","3UTR","5UTR","tRNA","Exon","Intron","rRNA")
+cdata = cdata[which(cdata$Annotation %in% select & grepl("K27ac",cdata$sample)),]
+cdata$sample %<>% gsub("_K27ac","",.) %>% factor(levels = c("8cell","Morula","ICM","TE"))
+
+cdata[,c("Annotation","Log2 Ratio (obs/exp)","sample")] -> enrich
+colnames(enrich)[2] = "enrich"
+
+m= round(min(enrich$enrich))
+M= round(max(enrich$enrich))
+enrich$enrich %<>%add(-m)
+ggplot(enrich) +
+    geom_bar(aes(x = Annotation,y=enrich,fill=sample),
+        stat="identity", position = position_dodge2(preserve = 'single'),
+        width = 0.5,show.legend = T) + geom_hline(yintercept=c(0,3),linetype="dashed") +
+    xlab("") + ylab("Log2(Obeserved/Expected)")+
+    scale_fill_manual(values = c("red","pink","blue","darkgreen"),guide=guide_legend(title = "")) +
+   coord_polar(theta = "x",start = -5) +
+    scale_y_continuous(limits = c(-6, M-m)) +
+    ggpubr::theme_pubr(border=T) +
+    theme(axis.line.y = element_line(),
+        plot.margin = margin(10,10,5,5),
+        aspect.ratio = 1,axis.text.x = element_text(angle = 45,hjust = 1))
+ggsave(paste0(wdir,"/annotate_K27ac_circle.pdf"),width = 9,height = 9,device = cairo_pdf)
+
+paste0(wdir,"/annStats/all.stats.tab") %>% read.tab(header=T) -> cdata
+select = c("Promoter","LTR","SINE","LINE")
+#select = c("Promoter","CpG-Island","LTR","SINE","LINE","3UTR","5UTR","Intergenic","tRNA","Exon","Intron","rRNA")
+cdata = cdata[which(cdata$Annotation %in% select & grepl("K27ac",cdata$sample)),]
+cdata$sample %<>% gsub("_K27ac","",.) %>% factor(levels = c("8cell","Morula","ICM","TE"))
+
+cdata[,c("Annotation","Log2 Ratio (obs/exp)","sample")] -> enrich
+colnames(enrich)[2] = "enrich"
+
+m= round(min(enrich$enrich))
+M= round(max(enrich$enrich))
+enrich$enrich %<>%add(-m)
+ggplot(enrich) +
+    geom_bar(aes(x = Annotation,y=enrich,fill=sample),
+        stat="identity", position = position_dodge2(preserve = 'single'),
+        width = 0.5,show.legend = T) + geom_hline(yintercept=c(0,3),linetype="dashed") +
+    xlab("") + ylab("Log2(Obeserved/Expected)")+
+    scale_fill_manual(values = c("red","pink","blue","darkgreen"),guide=guide_legend(title = "")) +
+    scale_y_continuous(limits = c(0, M-m),breaks = seq(0,6,1),labels = seq(-3,3,1)) +
+    ggpubr::theme_pubr(border=T) +
+    theme(axis.line.y = element_line(),
+        plot.margin = margin(10,10,5,5),
+        aspect.ratio = 1,axis.text.x = element_text(angle = 45,hjust = 1))
+
+ggsave(paste0(wdir,"/annotate_K27ac.pdf"),width = 9,height = 9,device = cairo_pdf)
+
+```

@@ -1,0 +1,66 @@
+---
+title: "Stringtie-analysis"
+output: html_document
+date: "2023-11-30"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+wdir="~/workspace/e.Blastocyst-K27ac/5.RNA/1.Stringtie"
+
+paste0(wdir,"/all.reps.TPM.txt") %>% read.tab(row.names = 1)-> cdata
+
+cdata = cdata[,c(1:4,11:13,23:25)] %>% add(1) %>%log2
+cdata = cdata[,c(1:7,11:13,23:25,29:31)] %>% add(1) %>%log2 #A485
+cdata = cdata[,c(1:7,17:19,23:25,29:31)] %>% add(1) %>%log2 #SAHA
+#cdata = cdata[apply(cdata,1,function(x) (mean(x[1:4])<1)&(mean(x[8:10])>1)),]
+
+#cdata = cdata[,grepl("Morula",colnames(cdata))]
+
+data_pca <- prcomp(t(cdata),scale. = F) # scale. = T  不好
+summary(data_pca)
+percentVar <- summary(data_pca)$importance[2,1:2]
+data_pca_x <- data.frame(data_pca$x[,1:2] )
+str.split(colnames(cdata),"_rep",n=2,col.names = c("sample","rep")) %>% cbind(data_pca_x) -> data_pca_x
+data_pca_x$sample %<>%factor()
+data_pca_x$rep %<>%factor()
+
+ggplot(data=data_pca_x, aes(PC1, PC2)) + geom_point(aes(color = sample),size = 7)+
+    geom_text(aes(label=rep)) +
+    xlab(paste0("PC1: ",percentVar[1]*100,"% variance")) +
+  ylab(paste0("PC2: ",percentVar[2]*100,"% variance")) +
+  scale_color_manual(values = as.vector(jdb_color_maps)) +
+    theme_bw() + theme(aspect.ratio = 1)
+
+ggsave(paste0(wdir,"/PCA.A485.pdf"),width = 10,height = 5)
+
+```
+
+```{r}
+wdir="~/workspace/e.Blastocyst-K27ac/5.RNA/1.Stringtie"
+
+paste0(wdir,"/all.reps.TPM.txt") %>% read.tab(row.names = 1)-> cdata
+cdata = cdata[,c(1:7,11:13,23:25)] %>% add(1) %>%log2
+cdata2 = cdata[apply(cdata,1,function(x) (mean(x[1:4])<1)&(mean(x[8:10])>1)&(mean(x[5:7])<1)),]
+
+data_pca <- prcomp(t(cdata),scale. = F) # scale. = T  不好
+summary(data_pca)
+percentVar <- summary(data_pca)$importance[2,1:2]
+data_pca_x <- data.frame(data_pca$x[,1:2] )
+str.split(colnames(cdata),"_rep",n=2,col.names = c("sample","rep")) %>% cbind(data_pca_x) -> data_pca_x
+data_pca_x$sample %<>%factor()
+data_pca_x$rep %<>%factor()
+
+ggplot(data=data_pca_x, aes(PC1, PC2)) + geom_point(aes(color = sample),size = 7)+
+    geom_text(aes(label=rep)) +
+    xlab(paste0("PC1: ",percentVar[1]*100,"% variance")) +
+  ylab(paste0("PC2: ",percentVar[2]*100,"% variance")) +
+  scale_color_manual(values = as.vector(jdb_color_maps)) +
+    theme_bw() + theme(aspect.ratio = 1)
+
+ggsave(paste0(wdir,"/PCA.all.pdf"),width = 10,height = 3)
+```
+
